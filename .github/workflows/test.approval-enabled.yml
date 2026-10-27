@@ -3,7 +3,7 @@ run-name: "Test CI/CD · ${{ github.event_name }} · ${{ github.ref_name }}"
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, reopened]
     branches:
       - main
   pull_request_review:
@@ -11,6 +11,7 @@ on:
   push:
     branches:
       - main
+      - enforce-workflows
 
 jobs:
   workflow:
