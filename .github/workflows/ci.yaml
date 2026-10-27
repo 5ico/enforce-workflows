@@ -71,7 +71,7 @@ jobs:
 
   build:
     needs: [gate, approval]
-    name: ${{ matrix.cell.app }} (${{ matrix.cell.platform }})
+    name: ${{ matrix.app.platform }} (${{ matrix.app.arch }})
     if: >-
       ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
           && (needs.approval.result == 'skipped' || needs.approval.outputs.build == 'true') }}
