@@ -1,0 +1,26 @@
+name: Test
+run-name: "Test CI/CD · ${{ github.event_name }} · ${{ github.ref_name }}"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  pull_request_review:
+    types: [submitted]
+  push:
+    branches:
+      - main
+
+jobs:
+  workflow:
+    if: github.event_name == 'push'
+    uses: 5ico/enforce-workflows/.github/workflows/ci.yaml@main
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: read
+      checks: read
+    with:
+      runner: ubuntu-latest
+    secrets: inherit

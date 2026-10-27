@@ -1,0 +1,126 @@
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Runner to run dedicated workloads'
+        required: false
+        type: string
+        default: ubuntu-latest
+jobs:
+  gate:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    outputs:
+      MODE: ${{ steps.mock.outputs.MODE }}
+      APPROVAL: ${{ steps.mock.outputs.APPROVAL }}
+    steps:
+      - name: Mock
+        id: mock
+        run: |
+          set -euo pipefail
+          echo "APPROVAL=true" >> "$GITHUB_OUTPUT"
+          echo "MODE=verify"   >> "$GITHUB_OUTPUT"
+  approval:
+    needs: [gate]
+    if: >-
+      ${{ !cancelled() && needs.gate.result == 'success'
+          && needs.gate.outputs.MODE == 'verify' && needs.gate.outputs.APPROVAL == 'true'
+          && (needs.gate.result == 'success' || needs.gate.result == 'skipped') }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 20
+    outputs:
+      approved: ${{ steps.decide.outputs.approved }}
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { repository } = await github.graphql(`
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    state
+                    isDraft
+                    headRefOid
+                    reviewDecision
+                  }
+                }
+              }
+            `, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              number: context.payload.pull_request.number
+            });
+
+            const pr = repository.pullRequest;
+            core.info(JSON.stringify(pr, null, 2));
+
+            const approved =
+              pr.state === "OPEN" &&
+              !pr.isDraft &&
+              pr.headRefOid === process.env.TARGET_SHA &&
+              pr.reviewDecision === "APPROVED";
+
+            core.setOutput("approved", String(approved));
+            core.setOutput("build", String(approved));
+
+  build:
+    needs: [gate, approval]
+    name: ${{ matrix.cell.app }} (${{ matrix.cell.platform }})
+    if: >-
+      ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
+          && (needs.approval.result == 'skipped' || needs.approval.outputs.build == 'true') }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.app.platform }}-${{ matrix.app.arch }}
+      cancel-in-progress: true
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - platform: macos
+            arch: arm64
+          - platform: macos
+            arch: arm64
+    steps:
+      - name: Git LFS
+
+        run: |
+          echo "Done"
+
+  pr-checks:
+    needs: [gate, approval, build]
+    name: pr-checks
+    if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') }}
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Gate on upstream results
+        run: |
+          set -euo pipefail
+          gate_result="${{ needs.gate.result }}"
+          approval_result="${{ needs.approval.result }}"
+          build_result="${{ needs.build.result }}"
+          echo "approval=$approval_result gate=$gate_result build=$build_result"
+          # skipped == no gate hooks, or a review (approval checks the commit's gates).
+          if [[ "$gate_result" != "success" && "$gate_result" != "skipped" ]]; then
+            echo "::error::a gate did not pass (result=$gate_result); see the gate jobs"; exit 1
+          fi
+          if [[ "$approval_result" != "success" && "$approval_result" != "skipped" ]]; then
+            echo "::error::the approval check did not finish (result=$approval_result)"; exit 1
+          fi
+          # pipeline skipped == no affected apps (a clean PR), which passes.
+          if [[ "$build_result" == "success" || "$build_result" == "skipped" ]]; then
+            echo "All matrix cells passed or were skipped."
+          else
+            echo "::error::one or more matrix cells failed (result=$build_result)"; exit 1
+          fi
