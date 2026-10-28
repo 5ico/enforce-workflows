@@ -75,7 +75,7 @@ jobs:
     name: ${{ matrix.app.platform }} (${{ matrix.app.arch }})
     if: >-
       ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
-          && (needs.approval.result == 'skipped' || needs.approval.outputs.build == 'true') }}
+          && (needs.approval.approved == 'true' || needs.approval.outputs.build == 'true') }}
     concurrency:
       group: build-${{ github.ref }}
       cancel-in-progress: false
