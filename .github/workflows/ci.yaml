@@ -24,7 +24,8 @@ jobs:
   approval:
     needs: [gate]
     if: >-
-      ${{ !cancelled() && needs.gate.result == 'success'
+      ${{ !cancelled() && github.event_name == 'pull_request'
+          && needs.gate.result == 'success'
           && needs.gate.outputs.MODE == 'verify' && needs.gate.outputs.APPROVAL == 'true'
           && (needs.gate.result == 'success' || needs.gate.result == 'skipped') }}
     runs-on: ${{ inputs.runner }}
