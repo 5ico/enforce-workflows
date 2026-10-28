@@ -91,6 +91,8 @@ jobs:
         app:
           - platform: macos
             arch: arm64
+          - platform: macos
+            arch: amd64
     steps:
       - name: Git LFS
         run: |
