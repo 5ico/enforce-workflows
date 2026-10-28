@@ -77,8 +77,8 @@ jobs:
       ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
           && (needs.approval.result == 'skipped' || needs.approval.outputs.build == 'true') }}
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: true
+      group: build-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
@@ -93,7 +93,6 @@ jobs:
             arch: arm64
     steps:
       - name: Git LFS
-
         run: |
           echo "Done"
 
