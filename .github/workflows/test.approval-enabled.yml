@@ -3,25 +3,25 @@ run-name: "Test CI/CD · ${{ github.event_name }} · ${{ github.ref_name }}"
 
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, edited]
     branches:
       - main
   pull_request_review:
-    types: [submitted]
+    types: [submitted, dismissed]
   push:
     branches:
       - main
-      # - enforce-workflows
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   workflow:
-    if: github.event_name == 'push'
-    uses: 5ico/enforce-workflows/.github/workflows/ci.yaml@main
+    if: github.event_name == 'push' || github.event.pull_request.base.ref == 'main'
+    uses: ./.github/workflows/ci.yaml
     permissions:
-      contents: write
-      id-token: write
+      contents: read
       pull-requests: read
-      checks: read
     with:
       runner: ubuntu-latest
-    secrets: inherit

@@ -24,15 +24,16 @@ jobs:
   approval:
     needs: [gate]
     if: >-
-      ${{ !cancelled() && github.event_name == 'pull_request'
+      ${{ !cancelled()
+          && (github.event_name == 'pull_request' || github.event_name == 'pull_request_review')
           && needs.gate.result == 'success'
-          && needs.gate.outputs.MODE == 'verify' && needs.gate.outputs.APPROVAL == 'true'
-          && (needs.gate.result == 'success' || needs.gate.result == 'skipped') }}
+          && needs.gate.outputs.MODE == 'verify' && needs.gate.outputs.APPROVAL == 'true' }}
     runs-on: ${{ inputs.runner }}
+    permissions:
+      pull-requests: read
     timeout-minutes: 20
     outputs:
       approved: ${{ steps.decide.outputs.approved }}
-      build: ${{ steps.decide.outputs.build }}
     steps:
       - name: Decide
         id: decide
@@ -68,27 +69,26 @@ jobs:
               pr.reviewDecision === "APPROVED";
 
             core.setOutput("approved", String(approved));
-            core.setOutput("build", String(approved));
+            if (!approved) {
+              core.notice("Build blocked: the current, non-draft PR must satisfy required reviews.");
+            }
 
   build:
     needs: [gate, approval]
     name: ${{ matrix.app.platform }} (${{ matrix.app.arch }})
     if: >-
-      ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
-          && (needs.approval.approved == 'true' || needs.approval.outputs.build == 'true') }}
-    concurrency:
-      group: build-${{ github.ref }}
-      cancel-in-progress: false
+      ${{ !cancelled() && needs.gate.result == 'success'
+          && (github.event_name == 'push'
+              || ((github.event_name == 'pull_request' || github.event_name == 'pull_request_review')
+                  && (needs.gate.outputs.MODE != 'verify' || needs.gate.outputs.APPROVAL != 'true'
+                      || (needs.approval.result == 'success' && needs.approval.outputs.approved == 'true')))) }}
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
-      id-token: write
     strategy:
       fail-fast: false
       matrix:
         app:
-          - platform: macos
-            arch: arm64
           - platform: macos
             arch: arm64
     steps:
@@ -105,22 +105,28 @@ jobs:
       contents: read
     steps:
       - name: Gate on upstream results
+        env:
+          GATE_RESULT: ${{ needs.gate.result }}
+          MODE: ${{ needs.gate.outputs.MODE }}
+          APPROVAL_REQUIRED: ${{ needs.gate.outputs.APPROVAL }}
+          APPROVAL_RESULT: ${{ needs.approval.result }}
+          APPROVED: ${{ needs.approval.outputs.approved }}
+          BUILD_RESULT: ${{ needs.build.result }}
         run: |
           set -euo pipefail
-          gate_result="${{ needs.gate.result }}"
-          approval_result="${{ needs.approval.result }}"
-          build_result="${{ needs.build.result }}"
-          echo "approval=$approval_result gate=$gate_result build=$build_result"
-          # skipped == no gate hooks, or a review (approval checks the commit's gates).
-          if [[ "$gate_result" != "success" && "$gate_result" != "skipped" ]]; then
-            echo "::error::a gate did not pass (result=$gate_result); see the gate jobs"; exit 1
+          echo "gate=$GATE_RESULT approval=$APPROVAL_RESULT approved=$APPROVED build=$BUILD_RESULT"
+          if [[ "$GATE_RESULT" != "success" ]]; then
+            echo "::error::The gate did not pass (result=$GATE_RESULT)."
+            exit 1
           fi
-          if [[ "$approval_result" != "success" && "$approval_result" != "skipped" ]]; then
-            echo "::error::the approval check did not finish (result=$approval_result)"; exit 1
+          if [[ "$MODE" == "verify" && "$APPROVAL_REQUIRED" == "true" ]]; then
+            if [[ "$APPROVAL_RESULT" != "success" || "$APPROVED" != "true" ]]; then
+              echo "::error::The current PR has not satisfied required reviews."
+              exit 1
+            fi
           fi
-          # pipeline skipped == no affected apps (a clean PR), which passes.
-          if [[ "$build_result" == "success" || "$build_result" == "skipped" ]]; then
-            echo "All matrix cells passed or were skipped."
-          else
-            echo "::error::one or more matrix cells failed (result=$build_result)"; exit 1
+          if [[ "$BUILD_RESULT" != "success" ]]; then
+            echo "::error::The build did not pass (result=$BUILD_RESULT)."
+            exit 1
           fi
+          echo "Approval policy and all matrix cells passed."
